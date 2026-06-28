@@ -6,13 +6,15 @@ import html
 import os
 from pathlib import Path
 import matplotlib.pyplot as plt
+import seaborn as sns
 from wordcloud import WordCloud
+from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
 
 # =========================
 # Page Configuration
 # =========================
 st.set_page_config(
-    page_title="Email Spam Detector",
+    page_title="InboxSentinel",
     page_icon="📧",
     layout="wide"
 )
@@ -40,6 +42,8 @@ load_css("styles.css")
 MODEL_PATH = Path("models/best_email_threat_model.pkl")
 VECTORIZER_PATH = Path("models/tfidf_vectorizer.pkl")
 DATA_PATH = Path("data/final_balanced_multilingual_email_dataset.csv")
+TEST_CONFUSION_MATRIX_IMAGE_PATH = Path("images/test_confusion_matrix_heatmap.png")
+MODEL_COMPARISON_PATH = Path("visualizations/model_comparison.csv")
 
 # =========================
 # Load Model and Vectorizer
@@ -62,6 +66,16 @@ def load_data():
 
     if len(csv_files) > 0:
         return pd.read_csv(csv_files[0])
+
+    return None
+
+# =========================
+# Load Model Comparison
+# =========================
+@st.cache_data
+def load_model_comparison():
+    if MODEL_COMPARISON_PATH.exists():
+        return pd.read_csv(MODEL_COMPARISON_PATH)
 
     return None
 
@@ -95,15 +109,90 @@ def find_spam_words(text):
     return found_words
 
 # =========================
+# Overall Evaluation Function
+# =========================
+def evaluate_model_on_dataset(data, model, vectorizer):
+    if data is None:
+        return None
+
+    if "label" not in data.columns:
+        return None
+
+    text_column = "clean_text" if "clean_text" in data.columns else "text"
+
+    if text_column not in data.columns:
+        return None
+
+    eval_data = data[[text_column, "label"]].dropna().copy()
+
+    if eval_data.empty:
+        return None
+
+    cleaned_texts = eval_data[text_column].apply(clean_text)
+    X_eval = vectorizer.transform(cleaned_texts)
+
+    y_true = eval_data["label"].astype(str)
+    y_pred = pd.Series(model.predict(X_eval)).astype(str)
+
+    labels = sorted(list(set(y_true) | set(y_pred)))
+
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+
+    accuracy = accuracy_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred, average="weighted", zero_division=0)
+    recall = recall_score(y_true, y_pred, average="weighted", zero_division=0)
+    f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+
+    return {
+        "cm": cm,
+        "labels": labels,
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+# =========================
+# Plot Heatmap Function
+# =========================
+def plot_confusion_heatmap(cm, labels, title, save_path):
+    fig, ax = plt.subplots(figsize=(5.4, 4.1))
+
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=labels,
+        yticklabels=labels,
+        ax=ax
+    )
+
+    ax.set_title(title, fontsize=11)
+    ax.set_xlabel("Predicted Label")
+    ax.set_ylabel("Actual Label")
+
+    plt.xticks(rotation=45, ha="right")
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+
+    fig.savefig(save_path, bbox_inches="tight", dpi=300)
+
+    return fig
+
+# =========================
 # Load Files
 # =========================
 try:
     model, vectorizer = load_model()
     data = load_data()
+    model_comparison = load_model_comparison()
 except Exception as e:
-    st.error("Error loading model, vectorizer, or dataset.")
+    st.error("Error loading model, vectorizer, dataset, or model comparison file.")
     st.write(e)
     st.stop()
+
+overall_evaluation_results = evaluate_model_on_dataset(data, model, vectorizer)
 
 # =========================
 # Top Navigation Bar
@@ -119,7 +208,7 @@ st.markdown("""
     <div class="top-brand">
         <div class="top-logo">📧</div>
         <div>
-            <div class="top-title">Email Spam Detector</div>
+            <div class="top-title">InboxSentinel</div>
             <div class="top-subtitle">AI-powered NLP email classification dashboard</div>
         </div>
     </div>
@@ -203,6 +292,48 @@ if page == "Home":
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="info-card blue-line">
+        <h3>Team Members</h3>
+    </div>
+    """, unsafe_allow_html=True)
+
+    team_col1, team_col2 = st.columns(2)
+
+    with team_col1:
+        st.markdown("""
+        <div class="info-card">
+            <h3>1. EMER IZZANIE BIN AZHARI</h3>
+            <h3>A24AI0025</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with team_col2:
+        st.markdown("""
+        <div class="info-card">
+            <h3>2. MOHAMAD KHAMSAH BIN MOHAMAD NAFIS</h3>
+            <h3>A24AI0047</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+    team_col3, team_col4 = st.columns(2)
+
+    with team_col3:
+        st.markdown("""
+        <div class="info-card">
+            <h3>3. AMIROL AQASHAH BIN AHMAD JUHAIRIMI</h3>
+            <h3>A24AI0017</h3>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with team_col4:
+        st.markdown("""
+        <div class="info-card">
+            <h3>4. HARRIS MUHAMMAD BIN HAMIDI</h3>
+            <h3>A24AI0031</h3>
+        </div>
+        """, unsafe_allow_html=True)
 
 # =========================
 # Email Analyzer Page
@@ -386,7 +517,7 @@ elif page == "Visualizations":
     <div class="page-header">
         <div class="page-header-title">📈 Visualizations</div>
         <div class="page-header-subtitle">
-            Visual insights from labels, words, and email text patterns.
+            Visual insights from labels, words, email text patterns, and model evaluation.
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -398,7 +529,12 @@ elif page == "Visualizations":
     text_column = "clean_text" if "clean_text" in data.columns else "text"
     all_text = " ".join(data[text_column].dropna().astype(str))
 
-    tab1, tab2, tab3 = st.tabs(["📊 Label Distribution", "☁️ Word Analysis", "📏 Text Patterns"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Label Distribution",
+        "☁️ Word Analysis",
+        "📏 Text Patterns",
+        "🧠 Model Evaluation"
+    ])
 
     with tab1:
         st.subheader("Bar Chart of Label Distribution")
@@ -506,6 +642,78 @@ elif page == "Visualizations":
                 st.pyplot(fig)
                 plt.close(fig)
 
+    with tab4:
+        st.subheader("Model Evaluation")
+
+        st.markdown("""
+        <div class="info-card blue-line">
+            <h3>Model Comparison and Confusion Matrix Heatmaps</h3>
+            <p>
+            This section shows the model comparison table, overall performance metrics, and confusion matrix heatmaps.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("#### Model Comparison Table")
+
+        if model_comparison is not None:
+            st.dataframe(model_comparison, use_container_width=True)
+        else:
+            st.warning("Model comparison file not found. Please save model_comparison.csv from your notebook first.")
+
+        if overall_evaluation_results is not None:
+            st.markdown("#### Overall Model Performance")
+
+            metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+            with metric_col1:
+                st.metric("Accuracy", f"{overall_evaluation_results['accuracy']:.2%}")
+
+            with metric_col2:
+                st.metric("Precision", f"{overall_evaluation_results['precision']:.2%}")
+
+            with metric_col3:
+                st.metric("Recall", f"{overall_evaluation_results['recall']:.2%}")
+
+            with metric_col4:
+                st.metric("F1-Score", f"{overall_evaluation_results['f1']:.2%}")
+
+        st.markdown("#### Confusion Matrix Comparison")
+
+        cm_col1, cm_col2 = st.columns(2)
+
+        with cm_col1:
+            st.markdown("##### Overall Confusion Matrix Heatmap")
+
+            if overall_evaluation_results is not None:
+                fig = plot_confusion_heatmap(
+                    overall_evaluation_results["cm"],
+                    overall_evaluation_results["labels"],
+                    "Overall Confusion Matrix",
+                    "images/overall_confusion_matrix_heatmap.png"
+                )
+
+                st.pyplot(fig)
+                plt.close(fig)
+            else:
+                st.warning("Overall confusion matrix cannot be generated.")
+
+        with cm_col2:
+            st.markdown("##### Test Confusion Matrix Heatmap")
+
+            if TEST_CONFUSION_MATRIX_IMAGE_PATH.exists():
+                st.image(str(TEST_CONFUSION_MATRIX_IMAGE_PATH), use_container_width=True)
+            else:
+                st.warning(
+                    "Test confusion matrix image not found. "
+                    "Please run the confusion matrix cell in your notebook first."
+                )
+
+        st.info(
+            "The model comparison table helps identify the best model setup. "
+            "The test confusion matrix is usually better to discuss in the report because it comes from the notebook test set."
+        )
+
 # =========================
 # Model Info Page
 # =========================
@@ -552,6 +760,8 @@ elif page == "Model Info":
 models/best_email_threat_model.pkl
 models/tfidf_vectorizer.pkl
 data/final_balanced_multilingual_email_dataset.csv
+images/test_confusion_matrix_heatmap.png
+visualizations/model_comparison.csv
 """)
 
     st.markdown("""
@@ -566,6 +776,30 @@ data/final_balanced_multilingual_email_dataset.csv
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+    if overall_evaluation_results is not None:
+        st.markdown("""
+        <div class="info-card green-line">
+            <h3>Model Performance Summary</h3>
+            <p>
+            The metrics below summarize the model performance using the current loaded dataset.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+        with metric_col1:
+            st.metric("Accuracy", f"{overall_evaluation_results['accuracy']:.2%}")
+
+        with metric_col2:
+            st.metric("Precision", f"{overall_evaluation_results['precision']:.2%}")
+
+        with metric_col3:
+            st.metric("Recall", f"{overall_evaluation_results['recall']:.2%}")
+
+        with metric_col4:
+            st.metric("F1-Score", f"{overall_evaluation_results['f1']:.2%}")
 
 st.markdown("""
 <div class="footer-note">
